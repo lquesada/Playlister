@@ -1,0 +1,6 @@
+,#playlist:p1 #title:<Hits 2026> #allowmissing,#playlist:p2 #strict,#playlist:p3 #ignore,#playlist:p4 #allowinvalid,#playlist:p5 #title:<Soft Pop>
+#track:t1 #title:<Song One>,1,#no,1,potato,1
+#track:t2 #title:<Song Two> #ignore,2,#no,2,1,2
+#track:t3 #title:<Song Three>,4,1,3,#no,2
+#track:t4,5,2,4,1,3
+#track:t5 #title:<Song Five>,6,3,5,2,4
