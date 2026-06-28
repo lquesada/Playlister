@@ -91,14 +91,10 @@ Playlist definition cells can contain multiple space-separated parameters:
 - **Title Check**:
   - `#title:<EXPECTED_TITLE>` (can also use `@` or `!` as separators, e.g. `#title:@My Rock Hits@`).
   - If defined, the tool verifies that Spotify's title matches this expected title. If there is a mismatch, the tool will stop with a validation error.
-- **Sequence Mode**:
-  - `#allowmissing`: Allows playlist track sequence numbers to contain gaps (e.g. `1, 2, 4, 5` is valid; track `3` is missing). If not set, missing numbers will cause a validation error.
-- **Invalid Inputs**:
-  - `#allowinvalid`: The tool ignores any invalid input strings in cells (such as text like `"potato"` or `"a"`) and treats them as `#no` instead of raising an error.
 - **Strict Check**:
-  - `#strict`: If set, every non-ignored track in the sheet must have an explicit number or `#no` in its cell. Any empty cells will trigger an error.
+  - `#strict`: If set, enables strict validation: sequence numbers must start at 1 and have no gaps, duplicate values raise errors, and empty or invalid cells trigger errors.
 - **Ignore**:
-  - `#ignore`: Ignores this playlist completely.
+  - `#ignore`: Ignores this playlist completely. (Takes precedence over `#strict` and `--strict`).
 
 ### 2. Track Syntax (Column 0, starting at Row 1)
 Track definition cells can contain multiple space-separated parameters:
@@ -114,13 +110,20 @@ Track definition cells can contain multiple space-separated parameters:
 ### 3. Inner Cells
 For Playlist `p` and Track `t`:
 - `#no`: Explicitly marks that track `t` is not in playlist `p`.
-- Positive Integer: Indicates the 1-based order index of track `t` in playlist `p`.
+- Positive Integer: Indicates the target ordering.
 - Empty cell:
-  - If playlist `p` has `#strict` enabled -> Raises strict validation error.
+  - If playlist `p` is run in strict mode (either `#strict` is in header or `--strict` global CLI flag is set) -> Raises strict validation error.
   - Otherwise -> Treated as `#no`.
 - Invalid string:
-  - If playlist `p` has `#allowinvalid` enabled -> Treated as `#no`.
-  - Otherwise -> Raises validation error.
+  - If playlist `p` is run in strict mode -> Raises validation error.
+  - Otherwise -> Treated as `#no`.
+
+### 4. Non-Strict Behavior (Default)
+When strict mode is not active:
+- Sequence numbers do not have to be continuous or start at 1. Gaps are allowed.
+- Empty and invalid cells are treated as `#no`.
+- Duplicate sequence numbers are allowed. Multiple tracks with the same number are stably randomized using the playlist ID as seed.
+- All track indices are normalized sequentially (1, 2, 3...) when sent to Spotify.
 
 ---
 

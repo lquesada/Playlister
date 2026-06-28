@@ -58,5 +58,12 @@ class TestCLI(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["invalid-subcmd"])
 
+    def test_strict_flag(self):
+        args = parse_args(["diff", "sheet.csv", "--strict"])
+        self.assertTrue(args.strict)
+        
+        args_no_strict = parse_args(["diff", "sheet.csv"])
+        self.assertFalse(getattr(args_no_strict, "strict", False))
+
 if __name__ == "__main__":
     unittest.main()

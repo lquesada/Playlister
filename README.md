@@ -76,6 +76,7 @@ Playlister uses a subcommand-based command-line interface.
 These flags can be placed before or after any subcommand that contacts Spotify:
 * `--key-dir <DIR_PATH>` (default: `~/.playlister`): Alternative directory for Spotify credentials and cache storage.
 * `--no-store-key`: Runs the current session in memory without saving credentials/tokens to disk.
+* `--strict`: Enforces strict validation on all processed playlists (errors on duplicate orders, gaps, invalid/empty cells).
 
 ### 1. `diff <csv_file>`
 Calculates differences between the CSV matrix and current Spotify playlists, printing a dry-run plan.
@@ -122,6 +123,39 @@ Deletes the entire stored credentials and cache directory (`~/.playlister`).
 
 ## CSV Formatting Rules
 For complete configuration syntax, inner cell rules, and parameter flags, see the [Playlister Documentation](doc/index.md).
+
+### CSV Input Example
+Below is an example of `my_playlist.csv` matrix configuration:
+
+```csv
+,#playlist:p1 #title:<Hits 2026> #strict,#playlist:p2 #title:<Soft Acoustic>,todo,#playlist:p3 #ignore
+#track:t1 #title:<Song One>,1,1,potato,1
+#track:t2 #title:<Song Two>,2,5,3,1
+#track:t3 #title:<Song Three>,3,5,4,2
+#track:t4 #title:<Song Four>,#no,1,5,3
+```
+
+How this is processed by `playlister`:
+1. **Column 1 (`p1`)**: Run in `#strict` mode. Sequence is continuous (`1, 2, 3`), no empty/invalid cells, no duplicates. Valid!
+2. **Column 2 (`p2`)**: Default non-strict mode. Gaps (`1, 5`) are allowed. Duplicate positions (both `t2` and `t3` have `5`) are stably randomized using the playlist ID `p2` as seed.
+3. **Column 3 (`todo`)**: Ignored entirely because it lacks the `#playlist` keyword.
+4. **Column 4 (`p3`)**: Ignored entirely because it has the `#ignore` directive.
+
+### Output of `print` Subcommand:
+
+Running `playlister print my_playlist.csv` output:
+```text
+Playlist: Hits 2026 (p1) (N/A, 3 tracks)
+1 - N/A - Track: Song One (t1)
+2 - N/A - Track: Song Two (t2)
+3 - N/A - Track: Song Three (t3)
+
+Playlist: Soft Acoustic (p2) (N/A, 3 tracks)
+1 - N/A - Track: Song Four (t4)
+2 - N/A - Track: Song One (t1)
+3 - N/A - Track: Song Two (t2)
+```
+*(Tracks in playlist `p2` that had duplicate order `5` are stably randomized and normalized to sequential indices).*
 
 ---
 

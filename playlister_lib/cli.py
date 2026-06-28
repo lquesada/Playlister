@@ -11,9 +11,7 @@ Playlist Fields & Directives (Row 0 cells):
   Multiple space-separated directives can be specified in each cell:
   - #playlist:<ID_or_URL>       - (Required) Spotify playlist ID or URL.
   - #title:<EXPECTED_TITLE>     - (Optional) Expected title. Quotes allowed: <Title>, @Title@, !Title!. Mismatches trigger errors.
-  - #allowmissing               - (Optional) Allows gaps/missing sequence numbers.
-  - #allowinvalid               - (Optional) Invalid cell inputs fallback to '#no' instead of raising an error.
-  - #strict                     - (Optional) Empty cells raise an error instead of falling back to '#no'.
+  - #strict                     - (Optional) Restricts check (errors on gaps, invalid/empty cells).
   - #ignore                     - (Optional) Ignores this playlist completely.
 
 Track Fields & Directives (Column 0 cells):
@@ -34,6 +32,11 @@ Track Fields & Directives (Column 0 cells):
         "--no-store-key", "--no_store_key",
         action="store_true",
         help="Do not store credentials in the credentials directory"
+    )
+    parent_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Consider all playlists strict"
     )
 
     parser = argparse.ArgumentParser(

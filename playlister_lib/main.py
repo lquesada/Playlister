@@ -61,6 +61,7 @@ def main():
         test_api_key=False,
         key_dir=getattr(parsed_args, "key_dir", None),
         no_store_key=getattr(parsed_args, "no_store_key", False),
+        strict=getattr(parsed_args, "strict", False) is True,
         dump=None,
         delete_key=False,
         check_all=False,
@@ -288,7 +289,7 @@ def main():
     # 4. Parse CSV
     try:
         with open(args.csv_file, "r") as f:
-            playlists, tracks, matrix = parse_csv_sheet(f)
+            playlists, tracks, matrix = parse_csv_sheet(f, force_strict=args.strict)
     except FileNotFoundError:
         print(f"Error: CSV file not found: {args.csv_file}", file=sys.stderr)
         sys.exit(1)
