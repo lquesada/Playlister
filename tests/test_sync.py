@@ -768,5 +768,76 @@ class TestSync(unittest.TestCase):
         # Verify duplicates are removed and final playlist is exactly ['t1', 't2']
         self.assertEqual(spotify_mock.playlists["p1"]["tracks"], ["t1", "t2"])
 
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_api_key', return_value='mock_key')
+    @patch('builtins.input')
+    @patch('spotipy.Spotify')
+    def test_sync_multiple_playlists_interactive(self, mock_spotify_cls, mock_input, mock_key, mock_args):
+        mock_args.return_value = MagicMock(
+            command="push",
+            csv_file="dummy.csv",
+            dry_run=False,
+            execute=True,
+            auto_approve=False,
+            remove_dupes=False,
+            test_api_key=False,
+            key_dir=None,
+            no_store_key=False,
+            dump=None,
+            delete_key=False
+        )
+        # Mock inputs: 'y' for p1, 'n' for p2
+        mock_input.side_effect = ['y', 'n']
+
+        spotify_mock = StatefulMockSpotify()
+        # Both p1 and p2 exist and need changes
+        spotify_mock.playlists = {
+            "p1": {"name": "Hits 2026", "tracks": ["t1", "t2"]},
+            "p2": {"name": "Soft Pop", "tracks": ["t3", "t1"]}
+        }
+        mock_spotify_cls.return_value = spotify_mock
+
+        csv_data = (
+            ",#playlist:p1 #title:<Hits 2026>,#playlist:p2 #title:<Soft Pop>\n"
+            "#track:t1 #title:<Song One>,1,ignore\n"
+            "#track:t2 #title:<Song Two>,ignore,ignore\n"
+            "#track:t3 #title:<Song Three>,ignore,1\n"
+        )
+
+        # Intercept stdout at input calls to verify sequential prompting
+        stdout_records = []
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            def mock_input_side_effect(prompt):
+                stdout_records.append(sys.stdout.getvalue())
+                if len(stdout_records) == 1:
+                    return 'y'
+                return 'n'
+            
+            mock_input.side_effect = mock_input_side_effect
+            
+            with patch('builtins.open', return_value=io.StringIO(csv_data)):
+                main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        finally:
+            sys.stdout = old_stdout
+
+        # Verify that when p1 was prompted, p2's diff had NOT been printed yet
+        self.assertEqual(len(stdout_records), 2)
+        self.assertIn("Playlist: Hits 2026", stdout_records[0])
+        self.assertNotIn("Playlist: Soft Pop", stdout_records[0])
+
+        # Verify that when p2 was prompted, p1's sync was complete/outputted, and p2's diff was printed
+        self.assertIn("Playlist: Hits 2026", stdout_records[1])
+        self.assertIn("Playlist: Soft Pop", stdout_records[1])
+        self.assertIn("Playlist Hits 2026 successfully synced.", stdout_records[1])
+
+        # p1 should be updated (remove t2, so tracks is ['t1'])
+        self.assertEqual(spotify_mock.playlists["p1"]["tracks"], ["t1"])
+        # p2 should NOT be updated (tracks remain ['t3', 't1'])
+        self.assertEqual(spotify_mock.playlists["p2"]["tracks"], ["t3", "t1"])
+
 if __name__ == "__main__":
     unittest.main()

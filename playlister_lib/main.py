@@ -43,6 +43,45 @@ def format_duration(ms):
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes}:{seconds:02d}"
 
+def display_playlist_diff(pc, track_cache):
+    total_ms = 0
+    all_durations_known = True
+    for _, t in pc["p_tracks"]:
+        t_info = track_cache.get(t.id)
+        if t_info and t_info.get("duration_ms") is not None:
+            total_ms += t_info["duration_ms"]
+        else:
+            all_durations_known = False
+    p_dur = format_duration(total_ms) if (all_durations_known and total_ms > 0) else "N/A"
+    print(f"Playlist: {pc['playlist_name']} ({p_dur}, {len(pc['p_tracks'])} tracks)")
+    for idx, (_, t) in enumerate(pc["p_tracks"], start=1):
+        track_name = t.title if t.title else t.id
+        t_info = track_cache.get(t.id)
+        t_dur = format_duration(t_info["duration_ms"]) if (t_info and t_info.get("duration_ms") is not None) else "N/A"
+        print(f"{idx} - {t_dur} - Track: {track_name}")
+
+    if pc["has_changes"]:
+        print("  Proposed changes:")
+        if pc.get("dupes"):
+            print("    ~ Duplicates found on Spotify. Cleaning and re-adding duplicate tracks.")
+        if pc["to_remove"]:
+            print("    - Remove:")
+            for tid in pc["to_remove"]:
+                name = track_cache.get(tid, {}).get("name", tid)
+                print(f"      * {name} ({tid})")
+        if pc["to_add"]:
+            print("    + Add:")
+            for tid in pc["to_add"]:
+                name = track_cache.get(tid, {}).get("name", tid)
+                print(f"      * {name} ({tid})")
+        if pc["reorder_needed"]:
+            print("    ~ Reorder:")
+            for tid, j, i in pc.get("proposed_moves", []):
+                name = track_cache.get(tid, {}).get("name", tid)
+                print(f"      * Move: {name} ({tid}) from position {j + 1} to position {i + 1}")
+    else:
+        print("  Playlist is already up to date.")
+
 def main():
     # 1. Guard Python version
     if sys.version_info < (3, 6):
@@ -487,60 +526,29 @@ def main():
         print("Local validation completed. No errors found.")
         sys.exit(0)
 
-    any_changes = False
-    for pc in playlists_changes:
-        total_ms = 0
-        all_durations_known = True
-        for _, t in pc["p_tracks"]:
-            t_info = track_cache.get(t.id)
-            if t_info and t_info.get("duration_ms") is not None:
-                total_ms += t_info["duration_ms"]
-            else:
-                all_durations_known = False
-        p_dur = format_duration(total_ms) if (all_durations_known and total_ms > 0) else "N/A"
-        print(f"Playlist: {pc['playlist_name']} ({p_dur}, {len(pc['p_tracks'])} tracks)")
-        for idx, (_, t) in enumerate(pc["p_tracks"], start=1):
-            track_name = t.title if t.title else t.id
-            t_info = track_cache.get(t.id)
-            t_dur = format_duration(t_info["duration_ms"]) if (t_info and t_info.get("duration_ms") is not None) else "N/A"
-            print(f"{idx} - {t_dur} - Track: {track_name}")
-
-        if pc["has_changes"]:
-            any_changes = True
-            print("  Proposed changes:")
-            if pc.get("dupes"):
-                print("    ~ Duplicates found on Spotify. Cleaning and re-adding duplicate tracks.")
-            if pc["to_remove"]:
-                print("    - Remove:")
-                for tid in pc["to_remove"]:
-                    name = track_cache.get(tid, {}).get("name", tid)
-                    print(f"      * {name} ({tid})")
-            if pc["to_add"]:
-                print("    + Add:")
-                for tid in pc["to_add"]:
-                    name = track_cache.get(tid, {}).get("name", tid)
-                    print(f"      * {name} ({tid})")
-            if pc["reorder_needed"]:
-                print("    ~ Reorder:")
-                for tid, j, i in pc.get("proposed_moves", []):
-                    name = track_cache.get(tid, {}).get("name", tid)
-                    print(f"      * Move: {name} ({tid}) from position {j + 1} to position {i + 1}")
-        else:
-            print("  Playlist is already up to date.")
-        print("\n")
+    any_changes = any(pc["has_changes"] for pc in playlists_changes)
 
     if not args.execute:
+        for pc in playlists_changes:
+            display_playlist_diff(pc, track_cache)
+            print("\n")
         print("Dry run completed. No changes applied.")
         print("You may want to run with 'push' and possibly with '--auto-approve'.")
         sys.exit(0)
 
     if not any_changes:
+        for pc in playlists_changes:
+            display_playlist_diff(pc, track_cache)
+            print("\n")
         print("All playlists are already up to date.")
         sys.exit(0)
 
     # 8. Apply modifications
     for pc in playlists_changes:
+        display_playlist_diff(pc, track_cache)
+        
         if not pc["has_changes"]:
+            print("\n")
             continue
 
         # 8.0 Confirmation check
@@ -556,6 +564,7 @@ def main():
 
         if not approved:
             print(f"Sync skipped for playlist: {pc['playlist_name']}")
+            print("\n")
             continue
 
         p = pc["playlist"]
@@ -618,6 +627,7 @@ def main():
             print(f"Error: Sync verification failed for playlist '{p.id}'. State does not match target.", file=sys.stderr)
             sys.exit(1)
         print(f"\nPlaylist {pc['playlist_name']} successfully synced.")
+        print("\n")
 
     save_cache(args.key_dir, track_cache)
     print("\nSync process completed.")
