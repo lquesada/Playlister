@@ -839,5 +839,186 @@ class TestSync(unittest.TestCase):
         # p2 should NOT be updated (tracks remain ['t3', 't1'])
         self.assertEqual(spotify_mock.playlists["p2"]["tracks"], ["t3", "t1"])
 
+
+class StatefulMockYouTube:
+    def __init__(self):
+        self.playlists = {
+            "PL1": {"name": "YT Hits 2026", "items": [
+                {"item_id": "it1", "video_id": "vid1", "title": "Song One Video"},
+                {"item_id": "it2", "video_id": "vid2", "title": "Song Two Video"}
+            ]}
+        }
+        self.video_meta = {
+            "vid1": {"name": "Song One Video", "duration_ms": 180000},
+            "vid2": {"name": "Song Two Video", "duration_ms": 180000},
+            "vid3": {"name": "Song Three Video", "duration_ms": 180000}
+        }
+        self._counter = 10
+
+    def get_playlist(self, playlist_id):
+        if playlist_id not in self.playlists:
+            raise Exception("Playlist not found")
+        return {"id": playlist_id, "name": self.playlists[playlist_id]["name"]}
+
+    def get_playlist_items(self, playlist_id):
+        if playlist_id not in self.playlists:
+            raise Exception("Playlist not found")
+        return list(self.playlists[playlist_id]["items"])
+
+    def get_video_details(self, video_ids):
+        return {vid: self.video_meta.get(vid, {"name": vid, "duration_ms": 180000}) for vid in video_ids}
+
+    def remove_playlist_item(self, playlist_item_id):
+        for p in self.playlists.values():
+            p["items"] = [it for it in p["items"] if it["item_id"] != playlist_item_id]
+
+    def add_playlist_item(self, playlist_id, video_id, position=None):
+        self._counter += 1
+        item_id = f"it{self._counter}"
+        item = {
+            "item_id": item_id,
+            "video_id": video_id,
+            "title": self.video_meta.get(video_id, {}).get("name", video_id)
+        }
+        if position is not None:
+            self.playlists[playlist_id]["items"].insert(position, item)
+        else:
+            self.playlists[playlist_id]["items"].append(item)
+
+    def reorder_playlist_item(self, playlist_item_id, playlist_id, video_id, position):
+        items = self.playlists[playlist_id]["items"]
+        found_idx = None
+        for idx, it in enumerate(items):
+            if it["item_id"] == playlist_item_id:
+                found_idx = idx
+                break
+        if found_idx is not None:
+            it = items.pop(found_idx)
+            items.insert(position, it)
+
+    def get_current_user_info(self):
+        return {"id": "test_channel", "display_name": "Test Channel"}
+
+
+class TestYouTubeSync(unittest.TestCase):
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
+    @patch('playlister_lib.main.YouTubeClient')
+    def test_youtube_diff_dry_run(self, mock_yt_cls, mock_key, mock_args):
+        yt_mock = StatefulMockYouTube()
+        mock_yt_cls.return_value = yt_mock
+
+        mock_args.return_value = MagicMock(
+            command="diff",
+            csv_file="dummy_yt.csv",
+            dry_run=True,
+            execute=False,
+            auto_approve=False,
+            remove_dupes=False,
+            test_api_key=False,
+            key_dir=None,
+            no_store_key=False,
+            dump=None,
+            delete_key=False,
+            service="youtube",
+            spotify=False,
+            youtube=True
+        )
+
+        csv_data = (
+            ",#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>\n"
+            "#youtubetrack:vid1 #youtubetitle:<Song One Video>,1\n"
+            "#youtubetrack:vid3 #youtubetitle:<Song Three Video>,2\n"
+        )
+
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            with patch('builtins.open', return_value=io.StringIO(csv_data)):
+                main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+        self.assertIn("Playlist: YT Hits 2026", output)
+        self.assertIn("- Remove:", output)
+        self.assertIn("Song Two Video (vid2)", output)
+        self.assertIn("+ Add:", output)
+        self.assertIn("Song Three Video (vid3)", output)
+        self.assertIn("Dry run completed. No changes applied.", output)
+
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
+    @patch('playlister_lib.main.YouTubeClient')
+    def test_youtube_push_apply(self, mock_yt_cls, mock_key, mock_args):
+        yt_mock = StatefulMockYouTube()
+        mock_yt_cls.return_value = yt_mock
+
+        mock_args.return_value = MagicMock(
+            command="push",
+            csv_file="dummy_yt.csv",
+            dry_run=False,
+            execute=True,
+            auto_approve=True,
+            remove_dupes=False,
+            test_api_key=False,
+            key_dir=None,
+            no_store_key=False,
+            dump=None,
+            delete_key=False,
+            service="youtube",
+            spotify=False,
+            youtube=True
+        )
+
+        # Target: vid1 at 1, vid3 at 2 (removes vid2, adds vid3)
+        csv_data = (
+            ",#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>\n"
+            "#youtubetrack:vid1 #youtubetitle:<Song One Video>,1\n"
+            "#youtubetrack:vid3 #youtubetitle:<Song Three Video>,2\n"
+        )
+
+        with patch('builtins.open', return_value=io.StringIO(csv_data)):
+            main()
+
+        final_vids = [it["video_id"] for it in yt_mock.playlists["PL1"]["items"]]
+        self.assertEqual(final_vids, ["vid1", "vid3"])
+
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
+    @patch('playlister_lib.main.YouTubeClient')
+    def test_youtube_dump(self, mock_yt_cls, mock_key, mock_args):
+        yt_mock = StatefulMockYouTube()
+        mock_yt_cls.return_value = yt_mock
+
+        mock_args.return_value = MagicMock(
+            command="dump",
+            playlist_or_album="https://www.youtube.com/playlist?list=PL1",
+            dump="https://www.youtube.com/playlist?list=PL1",
+            key_dir=None,
+            no_store_key=False,
+            service="youtube",
+            spotify=False,
+            youtube=True
+        )
+
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            main()
+        except SystemExit as e:
+            self.assertEqual(e.code, 0)
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+        self.assertIn("#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>", output)
+        self.assertIn("#youtubetrack:vid1 #youtubetitle:<Song One Video>", output)
+        self.assertIn("#youtubetrack:vid2 #youtubetitle:<Song Two Video>", output)
+
+
 if __name__ == "__main__":
     unittest.main()
+

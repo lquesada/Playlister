@@ -245,5 +245,94 @@ class TestParser(unittest.TestCase):
         ranks = [m1["p_seed1"][tid] for tid in ["t2", "t3", "t4"]]
         self.assertEqual(sorted(ranks), [2, 3, 4])
 
+    def test_youtube_directives_and_urls(self):
+        csv_data = (
+            ",#youtubeplaylist:https://www.youtube.com/playlist?list=PLtest_pl #youtubetitle:<YT Playlist>\n"
+            "#youtubetrack:https://www.youtube.com/watch?v=dQw4w9WgXcQ #youtubetitle:<Song 1>,1\n"
+            "#yttrack:https://youtu.be/abc123xyz #title:<Song 2>,2\n"
+        )
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        self.assertEqual(len(playlists), 1)
+        self.assertEqual(playlists[0].service, "youtube")
+        self.assertEqual(playlists[0].id, "PLtest_pl")
+        self.assertEqual(playlists[0].title, "YT Playlist")
+
+        self.assertEqual(len(tracks), 2)
+        self.assertEqual(tracks[0].youtube_id, "dQw4w9WgXcQ")
+        self.assertEqual(tracks[0].youtube_title, "Song 1")
+        self.assertEqual(tracks[1].youtube_id, "abc123xyz")
+        self.assertEqual(tracks[1].title, "Song 2")
+        self.assertEqual(matrix["PLtest_pl"]["dQw4w9WgXcQ"], 1)
+        self.assertEqual(matrix["PLtest_pl"]["abc123xyz"], 2)
+
+    def test_multi_column_descriptors(self):
+        # Column 0: Spotify Track info
+        # Column 1: YouTube Track info
+        # Column 2: Generic Title
+        # Column 3: Spotify Playlist
+        # Column 4: YouTube Playlist
+        csv_data = (
+            "Spotify,YouTube,Title,#spotifyplaylist:sp_hits #spotifytitle:<Sp Hits>,#youtubeplaylist:yt_hits #youtubetitle:<Yt Hits>\n"
+            "#spotifytrack:sp_song1,#youtubetrack:yt_video1,#title:<Song One>,1,1\n"
+            "#spotifytrack:sp_song2,#youtubetrack:yt_video2,#title:<Song Two>,2,#no\n"
+        )
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        self.assertEqual(len(playlists), 2)
+        self.assertEqual(playlists[0].id, "sp_hits")
+        self.assertEqual(playlists[0].service, "spotify")
+        self.assertEqual(playlists[1].id, "yt_hits")
+        self.assertEqual(playlists[1].service, "youtube")
+
+        self.assertEqual(len(tracks), 2)
+        self.assertEqual(tracks[0].spotify_id, "sp_song1")
+        self.assertEqual(tracks[0].youtube_id, "yt_video1")
+        self.assertEqual(tracks[0].title, "Song One")
+
+        self.assertEqual(tracks[1].spotify_id, "sp_song2")
+        self.assertEqual(tracks[1].youtube_id, "yt_video2")
+        self.assertEqual(tracks[1].title, "Song Two")
+
+        self.assertEqual(matrix["sp_hits"]["sp_song1"], 1)
+        self.assertEqual(matrix["sp_hits"]["sp_song2"], 2)
+        self.assertEqual(matrix["yt_hits"]["sp_song1"], 1)
+        self.assertEqual(matrix["yt_hits"]["sp_song2"], "#no")
+
+    def test_shared_playlist_column(self):
+        # Single column with both #spotifyplaylist and #youtubeplaylist
+        csv_data = (
+            ",#spotifyplaylist:sp_pl #youtubeplaylist:yt_pl #title:<Shared Playlist>\n"
+            "#spotifytrack:sp_1 #youtubetrack:yt_1 #title:<Track 1>,1\n"
+            "#spotifytrack:sp_2 #youtubetrack:yt_2 #title:<Track 2>,2\n"
+        )
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        # Should create 2 playlists (one spotify, one youtube)
+        self.assertEqual(len(playlists), 2)
+        p_sp = [p for p in playlists if p.service == "spotify"][0]
+        p_yt = [p for p in playlists if p.service == "youtube"][0]
+        self.assertEqual(p_sp.id, "sp_pl")
+        self.assertEqual(p_yt.id, "yt_pl")
+        self.assertEqual(matrix["sp_pl"]["sp_1"], 1)
+        self.assertEqual(matrix["sp_pl"]["sp_2"], 2)
+        self.assertEqual(matrix["yt_pl"]["sp_1"], 1)
+        self.assertEqual(matrix["yt_pl"]["sp_2"], 2)
+
+    def test_header_conventions_without_hash_in_cells(self):
+        # Header specifies #spotifytrack, #youtubetrack, #title
+        # Cells contain raw IDs and titles
+        csv_data = (
+            "#spotifytrack,#youtubetrack,#title,#playlist:p1\n"
+            "sp_raw_1,yt_raw_1,Song One,1\n"
+            "sp_raw_2,yt_raw_2,Song Two,2\n"
+        )
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        self.assertEqual(len(tracks), 2)
+        self.assertEqual(tracks[0].spotify_id, "sp_raw_1")
+        self.assertEqual(tracks[0].youtube_id, "yt_raw_1")
+        self.assertEqual(tracks[0].title, "Song One")
+        self.assertEqual(tracks[1].spotify_id, "sp_raw_2")
+        self.assertEqual(tracks[1].youtube_id, "yt_raw_2")
+        self.assertEqual(tracks[1].title, "Song Two")
+
 if __name__ == "__main__":
     unittest.main()
+
