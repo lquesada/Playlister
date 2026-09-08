@@ -89,6 +89,8 @@ class StatefulMockSpotify:
 
 class TestSync(unittest.TestCase):
     def setUp(self):
+        self.sleep_patcher = patch('time.sleep', return_value=None)
+        self.mock_sleep = self.sleep_patcher.start()
         # Skip patching resolve_key_path for tests that test directory/file deletion
         if self._testMethodName in ("test_clear_keys_and_clear_cache_subcommand", "test_delete_key_execution"):
             self.resolve_patcher = None
@@ -99,6 +101,8 @@ class TestSync(unittest.TestCase):
         self.mock_resolve = self.resolve_patcher.start()
 
     def tearDown(self):
+        if hasattr(self, 'sleep_patcher') and self.sleep_patcher:
+            self.sleep_patcher.stop()
         if hasattr(self, 'resolve_patcher') and self.resolve_patcher:
             self.resolve_patcher.stop()
             import shutil
@@ -901,6 +905,14 @@ class StatefulMockYouTube:
 
 
 class TestYouTubeSync(unittest.TestCase):
+    def setUp(self):
+        self.sleep_patcher = patch('time.sleep', return_value=None)
+        self.mock_sleep = self.sleep_patcher.start()
+
+    def tearDown(self):
+        if hasattr(self, 'sleep_patcher') and self.sleep_patcher:
+            self.sleep_patcher.stop()
+
     @patch('playlister_lib.main.parse_args')
     @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
     @patch('playlister_lib.main.YouTubeClient')
@@ -1017,6 +1029,177 @@ class TestYouTubeSync(unittest.TestCase):
         self.assertIn("#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>", output)
         self.assertIn("#youtubetrack:vid1 #youtubetitle:<Song One Video>", output)
         self.assertIn("#youtubetrack:vid2 #youtubetitle:<Song Two Video>", output)
+
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
+    @patch('playlister_lib.main.YouTubeClient')
+    def test_youtube_push_eventual_consistency_step3_recovery(self, mock_yt_cls, mock_key, mock_args):
+        yt_mock = StatefulMockYouTube()
+        mock_yt_cls.return_value = yt_mock
+
+        mock_args.return_value = MagicMock(
+            command="push",
+            csv_file="dummy_yt.csv",
+            dry_run=False,
+            execute=True,
+            auto_approve=True,
+            remove_dupes=False,
+            test_api_key=False,
+            key_dir=None,
+            no_store_key=False,
+            dump=None,
+            delete_key=False,
+            service="youtube",
+            spotify=False,
+            youtube=True
+        )
+
+        # Target: vid1 at 1, vid3 at 2 (removes vid2, adds vid3)
+        csv_data = (
+            ",#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>\n"
+            "#youtubetrack:vid1 #youtubetitle:<Song One Video>,1\n"
+            "#youtubetrack:vid3 #youtubetitle:<Song Three Video>,2\n"
+        )
+
+        # Simulate eventual consistency in Step 3:
+        # Call 1 (initial diff): normal (returns vid1, vid2)
+        # Call 2 (step 3 after add): simulates lagging replica returning only vid1 (count 1 instead of 2)
+        # Call 3 (step 3 retry): replica catches up, returns vid1, vid3 (count 2)
+        # Call 4 (step 4 verify): returns vid1, vid3
+        orig_get_items = yt_mock.get_playlist_items
+        call_count = [0]
+        def lagging_get_items(playlist_id):
+            call_count[0] += 1
+            real_items = orig_get_items(playlist_id)
+            if call_count[0] == 2:
+                # Simulate lagging read endpoint missing the newly added item
+                return [it for it in real_items if it["video_id"] != "vid3"]
+            return real_items
+
+        yt_mock.get_playlist_items = lagging_get_items
+
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            with patch('builtins.open', return_value=io.StringIO(csv_data)):
+                main()
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+        self.assertIn("Waiting for YouTube playlist changes to propagate...", output)
+        self.assertIn("Playlist [YouTube] YT Hits 2026 successfully synced.", output)
+        final_vids = [it["video_id"] for it in orig_get_items("PL1")]
+        self.assertEqual(final_vids, ["vid1", "vid3"])
+
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
+    @patch('playlister_lib.main.YouTubeClient')
+    def test_youtube_push_eventual_consistency_step4_recovery(self, mock_yt_cls, mock_key, mock_args):
+        yt_mock = StatefulMockYouTube()
+        mock_yt_cls.return_value = yt_mock
+
+        mock_args.return_value = MagicMock(
+            command="push",
+            csv_file="dummy_yt.csv",
+            dry_run=False,
+            execute=True,
+            auto_approve=True,
+            remove_dupes=False,
+            test_api_key=False,
+            key_dir=None,
+            no_store_key=False,
+            dump=None,
+            delete_key=False,
+            service="youtube",
+            spotify=False,
+            youtube=True
+        )
+
+        # Target: reorder vid2 to position 1, vid1 to position 2
+        csv_data = (
+            ",#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>\n"
+            "#youtubetrack:vid2 #youtubetitle:<Song Two Video>,1\n"
+            "#youtubetrack:vid1 #youtubetitle:<Song One Video>,2\n"
+        )
+
+        # Simulate eventual consistency in Step 4:
+        # Call 1 (initial diff): returns vid1, vid2
+        # Call 2 (step 3 reorder check): returns vid1, vid2 (reordering runs to move vid2)
+        # Call 3 (step 4 verification first attempt): returns stale pre-reorder order [vid1, vid2]
+        # Call 4 (step 4 verification retry): replica catches up, returns reordered [vid2, vid1]
+        orig_get_items = yt_mock.get_playlist_items
+        call_count = [0]
+        def lagging_get_items(playlist_id):
+            call_count[0] += 1
+            real_items = orig_get_items(playlist_id)
+            if call_count[0] == 3:
+                # Simulate stale read endpoint returning pre-reorder order
+                return list(reversed(real_items))
+            return real_items
+
+        yt_mock.get_playlist_items = lagging_get_items
+
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            with patch('builtins.open', return_value=io.StringIO(csv_data)):
+                main()
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+
+        self.assertIn("Waiting for YouTube playlist changes to propagate...", output)
+        self.assertIn("Playlist [YouTube] YT Hits 2026 successfully synced.", output)
+        final_vids = [it["video_id"] for it in orig_get_items("PL1")]
+        self.assertEqual(final_vids, ["vid2", "vid1"])
+
+    @patch('playlister_lib.main.parse_args')
+    @patch('playlister_lib.main.get_youtube_api_key', return_value='mock_yt_key')
+    @patch('playlister_lib.main.YouTubeClient')
+    def test_youtube_push_eventual_consistency_exhausted(self, mock_yt_cls, mock_key, mock_args):
+        yt_mock = StatefulMockYouTube()
+        mock_yt_cls.return_value = yt_mock
+
+        mock_args.return_value = MagicMock(
+            command="push",
+            csv_file="dummy_yt.csv",
+            dry_run=False,
+            execute=True,
+            auto_approve=True,
+            remove_dupes=False,
+            test_api_key=False,
+            key_dir=None,
+            no_store_key=False,
+            dump=None,
+            delete_key=False,
+            service="youtube",
+            spotify=False,
+            youtube=True
+        )
+
+        csv_data = (
+            ",#youtubeplaylist:PL1 #youtubetitle:<YT Hits 2026>\n"
+            "#youtubetrack:vid1 #youtubetitle:<Song One Video>,1\n"
+            "#youtubetrack:vid3 #youtubetitle:<Song Three Video>,2\n"
+        )
+
+        # Mock add_playlist_item to do nothing, simulating permanent failure to add
+        yt_mock.add_playlist_item = MagicMock(return_value={"id": "dummy"})
+
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            with patch('builtins.open', return_value=io.StringIO(csv_data)):
+                with self.assertRaises(SystemExit) as cm:
+                    main()
+                self.assertEqual(cm.exception.code, 1)
+        finally:
+            err_output = sys.stderr.getvalue()
+            sys.stderr = old_stderr
+
+        self.assertIn("Warning: Current playlist tracks count (1) does not match target count (2)", err_output)
+        self.assertIn("Error: Sync verification failed for playlist 'PL1'", err_output)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,10 @@
 import sys
 import os
+import time
 import collections
 import spotipy
+
+PROPAGATION_RETRY_DELAYS = [1.0, 2.0, 3.0, 4.0, 5.0]
 from playlister_lib.cli import parse_args
 from playlister_lib.key_store import get_api_key, load_cache, save_cache
 from playlister_lib.youtube_auth import (
@@ -897,6 +900,16 @@ def main():
                 current = [item["video_id"] for item in current_items]
                 target = pc["target_tracks"]
 
+                if (pc["to_remove"] or pc["to_add"]) and collections.Counter(current) != collections.Counter(target):
+                    print(f"Waiting for {service_name} playlist changes to propagate...")
+                    for delay in PROPAGATION_RETRY_DELAYS:
+                        time.sleep(delay)
+                        current_items = yt.get_playlist_items(p.id)
+                        current = [item["video_id"] for item in current_items]
+                        if collections.Counter(current) == collections.Counter(target):
+                            break
+
+                reordered = False
                 if current != target:
                     if len(current) != len(target):
                         print(f"Warning: Current playlist tracks count ({len(current)}) does not match target count ({len(target)}). Skipping reordering to avoid index errors.", file=sys.stderr)
@@ -914,6 +927,7 @@ def main():
                                 print(f"  - Move: {name} ({target_item}) from position {j + 1} to position {i + 1}")
                                 try:
                                     yt.reorder_playlist_item(item_to_move["item_id"], p.id, target_item, position=i)
+                                    reordered = True
                                     moved_v = current.pop(j)
                                     current.insert(i, moved_v)
                                     moved_it = current_items.pop(j)
@@ -927,6 +941,14 @@ def main():
                 # 4. Verification
                 final_items = yt.get_playlist_items(p.id)
                 final_tracks = [item["video_id"] for item in final_items]
+                if final_tracks != target and (pc["to_remove"] or pc["to_add"] or reordered):
+                    print(f"Waiting for {service_name} playlist changes to propagate...")
+                    for delay in PROPAGATION_RETRY_DELAYS:
+                        time.sleep(delay)
+                        final_items = yt.get_playlist_items(p.id)
+                        final_tracks = [item["video_id"] for item in final_items]
+                        if final_tracks == target:
+                            break
                 if final_tracks != target:
                     print(f"Error: Sync verification failed for playlist '{p.id}'. State does not match target.", file=sys.stderr)
                     sys.exit(1)
@@ -963,7 +985,17 @@ def main():
             current = get_current_tracks(sp, p.id, spotify_cache)
             save_cache(args.key_dir, spotify_cache)
             target = pc["target_tracks"]
-            
+
+            if (pc["to_remove"] or pc["to_add"]) and collections.Counter(current) != collections.Counter(target):
+                print(f"Waiting for {service_name} playlist changes to propagate...")
+                for delay in PROPAGATION_RETRY_DELAYS:
+                    time.sleep(delay)
+                    current = get_current_tracks(sp, p.id, spotify_cache)
+                    save_cache(args.key_dir, spotify_cache)
+                    if collections.Counter(current) == collections.Counter(target):
+                        break
+
+            reordered = False
             if current != target:
                 if len(current) != len(target):
                     print(f"Warning: Current playlist tracks count ({len(current)}) does not match target count ({len(target)}). Skipping reordering to avoid index errors.", file=sys.stderr)
@@ -980,6 +1012,7 @@ def main():
                             print(f"  - Move: {name} ({target_item}) from position {j + 1} to position {i + 1}")
                             try:
                                 sp.playlist_reorder_items(p.id, range_start=j, insert_before=i)
+                                reordered = True
                                 item = current.pop(j)
                                 current.insert(i, item)
                             except Exception as e:
@@ -989,6 +1022,14 @@ def main():
             # 4. Verification check
             final_tracks = get_current_tracks(sp, p.id, spotify_cache)
             save_cache(args.key_dir, spotify_cache)
+            if final_tracks != target and (pc["to_remove"] or pc["to_add"] or reordered):
+                print(f"Waiting for {service_name} playlist changes to propagate...")
+                for delay in PROPAGATION_RETRY_DELAYS:
+                    time.sleep(delay)
+                    final_tracks = get_current_tracks(sp, p.id, spotify_cache)
+                    save_cache(args.key_dir, spotify_cache)
+                    if final_tracks == target:
+                        break
             if final_tracks != target:
                 print(f"Error: Sync verification failed for playlist '{p.id}'. State does not match target.", file=sys.stderr)
                 sys.exit(1)
