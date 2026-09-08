@@ -81,7 +81,8 @@ def display_playlist_diff(pc, track_cache):
         else:
             all_durations_known = False
     p_dur = format_duration(total_ms) if (all_durations_known and total_ms > 0) else "N/A"
-    print(f"Playlist: {pc['playlist_name']} ({p_dur}, {len(pc['p_tracks'])} tracks)")
+    svc_name = "YouTube" if is_yt else "Spotify"
+    print(f"Playlist [{svc_name}]: {pc['playlist_name']} ({p_dur}, {len(pc['p_tracks'])} tracks)")
     for idx, (_, t) in enumerate(pc["p_tracks"], start=1):
         tid = t.youtube_id if is_yt else t.id
         track_name = (t.youtube_title if is_yt else t.title) or t.title or tid
@@ -137,7 +138,8 @@ def main():
         service=getattr(parsed_args, "service", "all"),
         spotify=getattr(parsed_args, "spotify", False),
         youtube=getattr(parsed_args, "youtube", False),
-        youtube_client_secrets=getattr(parsed_args, "youtube_client_secrets", None)
+        youtube_client_secrets=getattr(parsed_args, "youtube_client_secrets", None),
+        ignore_missing_tracks=getattr(parsed_args, "ignore_missing_tracks", False) is True
     )
     
     cmd = getattr(parsed_args, "command", None)
@@ -432,7 +434,7 @@ def main():
     # Parse CSV Sheet
     try:
         with open(args.csv_file, "r", encoding="utf-8") as f:
-            playlists, tracks, matrix = parse_csv_sheet(f, force_strict=args.strict)
+            playlists, tracks, matrix = parse_csv_sheet(f, force_strict=args.strict, ignore_missing_tracks=args.ignore_missing_tracks)
     except FileNotFoundError:
         print(f"Error: CSV file not found: {args.csv_file}", file=sys.stderr)
         sys.exit(1)
@@ -804,7 +806,8 @@ def main():
     # Local print command
     if args.local:
         for pc in playlists_changes:
-            print(f"Playlist: {pc['playlist_name']} (Local, {len(pc['p_tracks'])} tracks)")
+            svc_name = "YouTube" if pc.get("service") == "youtube" else "Spotify"
+            print(f"Playlist [{svc_name}]: {pc['playlist_name']} (Local, {len(pc['p_tracks'])} tracks)")
             for idx, (_, t) in enumerate(pc["p_tracks"], start=1):
                 track_name = (t.youtube_title if pc.get("service") == "youtube" else t.title) or t.title or t.id
                 print(f"{idx} - Track: {track_name}")
@@ -857,7 +860,7 @@ def main():
             continue
 
         p = pc["playlist"]
-        print(f"\nSyncing playlist: {pc['playlist_name']}")
+        print(f"\nSyncing playlist [{service_name}]: {pc['playlist_name']}")
 
         if pc.get("service") == "youtube":
             try:
@@ -927,7 +930,7 @@ def main():
                 if final_tracks != target:
                     print(f"Error: Sync verification failed for playlist '{p.id}'. State does not match target.", file=sys.stderr)
                     sys.exit(1)
-                print(f"\nPlaylist {pc['playlist_name']} successfully synced.")
+                print(f"\nPlaylist [{service_name}] {pc['playlist_name']} successfully synced.")
                 print("\n")
             except YouTubeQuotaExceededError:
                 handle_youtube_quota_exceeded(args.key_dir, cache)
@@ -989,7 +992,7 @@ def main():
             if final_tracks != target:
                 print(f"Error: Sync verification failed for playlist '{p.id}'. State does not match target.", file=sys.stderr)
                 sys.exit(1)
-            print(f"\nPlaylist {pc['playlist_name']} successfully synced.")
+            print(f"\nPlaylist [{service_name}] {pc['playlist_name']} successfully synced.")
             print("\n")
 
     if has_spotify:

@@ -342,7 +342,7 @@ class TestSync(unittest.TestCase):
             sys.stdout = old_stdout
 
         self.assertIn("Local validation completed. No errors found.", output)
-        self.assertIn("Playlist: Hits 2026 (Local, 2 tracks)", output)
+        self.assertIn("Playlist [Spotify]: Hits 2026 (Local, 2 tracks)", output)
 
     @patch('playlister_lib.main.parse_args')
     @patch('playlister_lib.main.get_api_key', return_value='mock_key')
@@ -826,13 +826,13 @@ class TestSync(unittest.TestCase):
 
         # Verify that when p1 was prompted, p2's diff had NOT been printed yet
         self.assertEqual(len(stdout_records), 2)
-        self.assertIn("Playlist: Hits 2026", stdout_records[0])
-        self.assertNotIn("Playlist: Soft Pop", stdout_records[0])
+        self.assertIn("Playlist [Spotify]: Hits 2026", stdout_records[0])
+        self.assertNotIn("Playlist [Spotify]: Soft Pop", stdout_records[0])
 
         # Verify that when p2 was prompted, p1's sync was complete/outputted, and p2's diff was printed
-        self.assertIn("Playlist: Hits 2026", stdout_records[1])
-        self.assertIn("Playlist: Soft Pop", stdout_records[1])
-        self.assertIn("Playlist Hits 2026 successfully synced.", stdout_records[1])
+        self.assertIn("Playlist [Spotify]: Hits 2026", stdout_records[1])
+        self.assertIn("Playlist [Spotify]: Soft Pop", stdout_records[1])
+        self.assertIn("Playlist [Spotify] Hits 2026 successfully synced.", stdout_records[1])
 
         # p1 should be updated (remove t2, so tracks is ['t1'])
         self.assertEqual(spotify_mock.playlists["p1"]["tracks"], ["t1"])
@@ -942,7 +942,7 @@ class TestYouTubeSync(unittest.TestCase):
             output = sys.stdout.getvalue()
             sys.stdout = old_stdout
 
-        self.assertIn("Playlist: YT Hits 2026", output)
+        self.assertIn("Playlist [YouTube]: YT Hits 2026", output)
         self.assertIn("- Remove:", output)
         self.assertIn("Song Two Video (vid2)", output)
         self.assertIn("+ Add:", output)

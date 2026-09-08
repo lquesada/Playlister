@@ -123,6 +123,7 @@ By default, the tool prompts for confirmation before applying changes to each pl
 * `--key-dir <DIR_PATH>` (default: `~/.playlister`): Alternative directory for credentials and caches.
 * `--no-store-key`: Prompts for credentials in memory without saving to disk.
 * `--strict`: Enforces strict validation on all processed playlists (disallows gaps and duplicate positions).
+* `--ignore-missing-tracks`: Ignores and skips CSV rows that do not have a valid track ID.
 
 ### 1. `diff <csv_file>`
 Calculates differences between the CSV matrix and online playlists, displaying a dry-run plan.

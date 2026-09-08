@@ -333,6 +333,21 @@ class TestParser(unittest.TestCase):
         self.assertEqual(tracks[1].youtube_id, "yt_raw_2")
         self.assertEqual(tracks[1].title, "Song Two")
 
+    def test_ignore_missing_tracks(self):
+        csv_data = (
+            ",#playlist:p1\n"
+            ",1\n"
+            "#track:t1,2\n"
+        )
+        with self.assertRaises(PlaylisterError):
+            parse_csv_sheet(io.StringIO(csv_data), ignore_missing_tracks=False)
+
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data), ignore_missing_tracks=True)
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0].id, "t1")
+        self.assertEqual(matrix["p1"]["t1"], 1)
+
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -6,6 +6,13 @@ from unittest.mock import patch
 from playlister_lib.key_store import get_api_key, resolve_key_path
 
 class TestKeyStore(unittest.TestCase):
+    def setUp(self):
+        self.wb_patcher = patch('webbrowser.open')
+        self.mock_wb_open = self.wb_patcher.start()
+
+    def tearDown(self):
+        self.wb_patcher.stop()
+
     def test_resolve_key_path(self):
         self.assertEqual(resolve_key_path("/tmp/test_key"), "/tmp/test_key")
         default_path = resolve_key_path(None)
@@ -32,6 +39,7 @@ class TestKeyStore(unittest.TestCase):
             
             mode = os.stat(keys_file).st_mode & 0o777
             self.assertEqual(mode, 0o600)
+            self.mock_wb_open.assert_called()
 
     @patch('playlister_lib.key_store._request_token', return_value=("mocked_access_token", "mocked_refresh_token", 3600))
     @patch('builtins.input')

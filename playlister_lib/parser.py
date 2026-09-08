@@ -228,7 +228,7 @@ def is_playlist_header_cell(cell):
     return any(tag in val for tag in playlist_tags)
 
 
-def parse_csv_sheet(fileobj, force_strict=False):
+def parse_csv_sheet(fileobj, force_strict=False, ignore_missing_tracks=False):
     reader = csv.reader(fileobj)
     try:
         rows = list(reader)
@@ -315,6 +315,8 @@ def parse_csv_sheet(fileobj, force_strict=False):
             continue
 
         if not t.id:
+            if ignore_missing_tracks:
+                continue
             raw_cell = row[0] if row else ""
             raise PlaylisterError(f"Track cell at row {r_idx} misses a valid track ID: '{raw_cell}'")
 

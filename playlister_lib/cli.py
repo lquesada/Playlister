@@ -68,6 +68,11 @@ Track Directives (Row 1+ cells in any descriptor column):
         default=None,
         help="Path to Google Cloud client_secrets.json file for YouTube API"
     )
+    parent_parser.add_argument(
+        "--ignore-missing-tracks", "--ignore_missing_tracks",
+        action="store_true",
+        help="Ignore and skip CSV rows that do not have a valid track ID"
+    )
 
     parser = argparse.ArgumentParser(
         description="Spotify & YouTube Playlister CSV manager.",
