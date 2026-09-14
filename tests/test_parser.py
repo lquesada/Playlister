@@ -49,8 +49,13 @@ class TestParser(unittest.TestCase):
 
     def test_missing_track_id(self):
         csv_data = ",#playlist:p1\n#title:<Track 1>,1\n"
+        # By default, missing tracks are skipped
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        self.assertEqual(len(tracks), 0)
+
+        # Under strict mode, it raises PlaylisterError
         with self.assertRaises(PlaylisterError) as ctx:
-            parse_csv_sheet(io.StringIO(csv_data))
+            parse_csv_sheet(io.StringIO(csv_data), ignore_missing_tracks=False)
         self.assertIn("misses a valid track ID", str(ctx.exception))
 
     def test_sequence_error_with_strict(self):
@@ -154,13 +159,13 @@ class TestParser(unittest.TestCase):
             parse_csv_sheet(io.StringIO(csv_data))
         self.assertIn("misses a valid playlist ID", str(ctx.exception))
 
-        # Track directive with no ID/colon
+        # Track directive with no ID/colon under strict mode
         csv_data2 = (
             ",#playlist:p1\n"
             "#track,1\n"
         )
         with self.assertRaises(PlaylisterError) as ctx:
-            parse_csv_sheet(io.StringIO(csv_data2))
+            parse_csv_sheet(io.StringIO(csv_data2), ignore_missing_tracks=False)
         self.assertIn("misses a valid track ID", str(ctx.exception))
 
     def test_sequence_start_greater_than_1(self):
@@ -346,6 +351,56 @@ class TestParser(unittest.TestCase):
         self.assertEqual(len(tracks), 1)
         self.assertEqual(tracks[0].id, "t1")
         self.assertEqual(matrix["p1"]["t1"], 1)
+
+    def test_multi_row_playlist_headers(self):
+        csv_data = (
+            "Title,#spotifyplaylist:sp_hits #title:<Hits>\n"
+            ",#youtubeplaylist:yt_hits\n"
+            "Cat,Category Label\n"
+            "#track:t1,1\n"
+        )
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        self.assertEqual(len(playlists), 2)
+        sp_p = next(p for p in playlists if p.service == "spotify")
+        yt_p = next(p for p in playlists if p.service == "youtube")
+        self.assertEqual(sp_p.id, "sp_hits")
+        self.assertEqual(yt_p.id, "yt_hits")
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0].id, "t1")
+        self.assertEqual(matrix["sp_hits"]["t1"], 1)
+        self.assertEqual(matrix["yt_hits"]["t1"], 1)
+
+    def test_embedded_playlist_row_skipped(self):
+        csv_data = (
+            ",#playlist:p1\n"
+            "#track:t1,1\n"
+            ",#spotifyplaylist:p2\n"
+            "#track:t2,2\n"
+        )
+        playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+        self.assertEqual(len(tracks), 2)
+        self.assertEqual(tracks[0].id, "t1")
+        self.assertEqual(tracks[1].id, "t2")
+
+    def test_warning_emitted_for_skipped_row_with_rankings(self):
+        import io
+        import sys
+        csv_data = (
+            ",#playlist:p1\n"
+            "#title:<Typo Song>,1\n"
+            "#track:t1,2\n"
+        )
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            playlists, tracks, matrix = parse_csv_sheet(io.StringIO(csv_data))
+            err_output = sys.stderr.getvalue()
+        finally:
+            sys.stderr = old_stderr
+
+        self.assertIn("Warning: Row 1 has playlist rankings", err_output)
+        self.assertIn("Use --strict-tracks", err_output)
+        self.assertEqual(len(tracks), 1)
 
 if __name__ == "__main__":
     unittest.main()

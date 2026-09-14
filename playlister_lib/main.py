@@ -142,7 +142,7 @@ def main():
         spotify=getattr(parsed_args, "spotify", False),
         youtube=getattr(parsed_args, "youtube", False),
         youtube_client_secrets=getattr(parsed_args, "youtube_client_secrets", None),
-        ignore_missing_tracks=getattr(parsed_args, "ignore_missing_tracks", False) is True
+        ignore_missing_tracks=(getattr(parsed_args, "ignore_missing_tracks", True) is not False and not getattr(parsed_args, "strict_tracks", False))
     )
     
     cmd = getattr(parsed_args, "command", None)

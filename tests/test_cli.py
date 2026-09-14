@@ -65,5 +65,23 @@ class TestCLI(unittest.TestCase):
         args_no_strict = parse_args(["diff", "sheet.csv"])
         self.assertFalse(getattr(args_no_strict, "strict", False))
 
+    def test_strict_tracks_flags(self):
+        # Default behavior: ignore_missing_tracks is True, strict_tracks is False
+        args_default = parse_args(["diff", "sheet.csv"])
+        self.assertTrue(args_default.ignore_missing_tracks)
+        self.assertFalse(args_default.strict_tracks)
+
+        # --strict-tracks
+        args_strict = parse_args(["diff", "sheet.csv", "--strict-tracks"])
+        self.assertTrue(args_strict.strict_tracks)
+
+        # --fail-on-missing-tracks alias
+        args_fail = parse_args(["diff", "sheet.csv", "--fail-on-missing-tracks"])
+        self.assertTrue(args_fail.strict_tracks)
+
+        # --no-ignore-missing-tracks
+        args_no_ignore = parse_args(["diff", "sheet.csv", "--no-ignore-missing-tracks"])
+        self.assertFalse(args_no_ignore.ignore_missing_tracks)
+
 if __name__ == "__main__":
     unittest.main()

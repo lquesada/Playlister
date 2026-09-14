@@ -228,7 +228,7 @@ def is_playlist_header_cell(cell):
     return any(tag in val for tag in playlist_tags)
 
 
-def parse_csv_sheet(fileobj, force_strict=False, ignore_missing_tracks=False):
+def parse_csv_sheet(fileobj, force_strict=False, ignore_missing_tracks=True):
     reader = csv.reader(fileobj)
     try:
         rows = list(reader)
@@ -240,21 +240,29 @@ def parse_csv_sheet(fileobj, force_strict=False, ignore_missing_tracks=False):
             raise PlaylisterError("CSV is empty.")
         return [], [], {}
     
-    header = rows[0]
-    
-    # Identify descriptor columns (non-playlist) vs playlist columns
-    descriptor_col_indices = []
-    raw_playlist_cols = []
-    
-    for idx, col in enumerate(header):
-        if is_playlist_header_cell(col):
-            raw_playlist_cols.append((idx, col))
+    # Identify header rows (row 0 and any subsequent rows before tracks that define playlists)
+    playlist_cols_by_idx = collections.OrderedDict()
+    header_row_indices = {0}
+
+    for r_idx, r in enumerate(rows):
+        if r_idx == 0 or any(is_playlist_header_cell(c) for c in r):
+            header_row_indices.add(r_idx)
+            for c_idx, cell in enumerate(r):
+                if is_playlist_header_cell(cell):
+                    if c_idx in playlist_cols_by_idx:
+                        playlist_cols_by_idx[c_idx] = playlist_cols_by_idx[c_idx] + " " + cell.strip()
+                    else:
+                        playlist_cols_by_idx[c_idx] = cell.strip()
         else:
-            descriptor_col_indices.append(idx)
-            
+            # Stop aggregating header rows once a non-playlist row is encountered
+            break
+
+    raw_playlist_cols = list(playlist_cols_by_idx.items())
     if not raw_playlist_cols:
         return [], [], {}
-    
+
+    header = rows[0]
+    descriptor_col_indices = [idx for idx in range(len(header)) if idx not in playlist_cols_by_idx]
     descriptor_headers = [header[idx] for idx in descriptor_col_indices]
 
     # Parse playlist headers
@@ -302,7 +310,11 @@ def parse_csv_sheet(fileobj, force_strict=False, ignore_missing_tracks=False):
     track_rows = []
 
     for r_idx, row in enumerate(rows[1:], start=1):
+        if r_idx in header_row_indices:
+            continue
         if not row or not any(c.strip() for c in row):
+            continue
+        if any(is_playlist_header_cell(c) for c in row):
             continue
 
         desc_cells = []
@@ -316,6 +328,19 @@ def parse_csv_sheet(fileobj, force_strict=False, ignore_missing_tracks=False):
 
         if not t.id:
             if ignore_missing_tracks:
+                # Check if this row has rankings in any playlist columns to warn the user
+                assigned_playlists = []
+                for col_idx, p in playlist_col_map:
+                    if col_idx < len(row):
+                        cell_val = row[col_idx].strip()
+                        if cell_val.isdigit() and int(cell_val) > 0:
+                            assigned_playlists.append((p.display_name, cell_val))
+                if assigned_playlists:
+                    details = ", ".join(f"{name} = {val}" for name, val in assigned_playlists)
+                    import sys
+                    sys.stderr.write(
+                        f"Warning: Row {r_idx} has playlist rankings ({details}) but misses a valid track ID; skipping row. Use --strict-tracks to treat this as an error.\n"
+                    )
                 continue
             raw_cell = row[0] if row else ""
             raise PlaylisterError(f"Track cell at row {r_idx} misses a valid track ID: '{raw_cell}'")

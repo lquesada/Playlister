@@ -69,9 +69,24 @@ Track Directives (Row 1+ cells in any descriptor column):
         help="Path to Google Cloud client_secrets.json file for YouTube API"
     )
     parent_parser.add_argument(
-        "--ignore-missing-tracks", "--ignore_missing_tracks",
+        "--strict-tracks", "--strict_tracks", "--fail-on-missing-tracks",
+        dest="strict_tracks",
         action="store_true",
-        help="Ignore and skip CSV rows that do not have a valid track ID"
+        default=False,
+        help="Fail if any non-empty CSV row lacks a valid track ID"
+    )
+    parent_parser.add_argument(
+        "--ignore-missing-tracks", "--ignore_missing_tracks",
+        dest="ignore_missing_tracks",
+        action="store_true",
+        default=True,
+        help="Ignore and skip CSV rows that do not have a valid track ID (default: True)"
+    )
+    parent_parser.add_argument(
+        "--no-ignore-missing-tracks", "--no_ignore_missing_tracks",
+        dest="ignore_missing_tracks",
+        action="store_false",
+        help="Disallow skipping CSV rows that lack a valid track ID"
     )
 
     parser = argparse.ArgumentParser(
